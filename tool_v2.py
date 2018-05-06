@@ -3,18 +3,22 @@ import sys
 import bisect
 
 arrayList = []
+loopIters = []
 nodeList = []
 computationList = []
 accessGraph = []
 dfaList = []
+entryList  = []
 codeList = []
-
+sparseArrayList = []
+directory = '/home/barnali/Documents/IITB/PHD/parallel_sparse/semiautomatic-tool/source/genCode_dir/'
 def prepare_data(dataFile):
   array = ''
   rowDecl = ''
   dataList = []
   for df in dataFile:
     indxList = []
+    valList = []
     f1 = open(df,'r')
     array = f1.readline().strip()
     dim = get_dimension(array)	
@@ -24,13 +28,18 @@ def prepare_data(dataFile):
           entry = line.split()
           row = int(entry[0])
           col = int(entry[1])            
+          val = int(entry[2])
           indxList = update_indxList(row,col,indxList)
+          valList.append(val)
     if dim == 1:
       for indx,line in enumerate(f1):      
         if indx >= 1:
           entry = line.split()
           indx = int(entry[0])
+          val = int(entry[1])
 	  bisect.insort(indxList,indx)
+          valList.append(val)
+
     f1.close()
     if array == '':
       print "error!!! annotate the data file with the name of accessing array"
@@ -38,6 +47,7 @@ def prepare_data(dataFile):
       sparseEntry = []
       sparseEntry.append(array)
       sparseEntry.append(indxList)
+      sparseEntry.append(valList)
       dataList.append(sparseEntry)
   return dataList
     
@@ -58,7 +68,7 @@ def update_indxList(row,col,tmpList):
     bisect.insort(tmpList,item)
   return tmpList
 
-def post_process(dataList):
+def postProcess_dataList(dataList):
   for array in arrayList:
     post_process1(array[0])
 
@@ -66,28 +76,44 @@ def post_process1(array):
     dim = get_dimension(array)
     for indx,data in enumerate(dataList):
       if data[0] == array:
-        length = 0
+        totalLength = 0
         if dim == 2:
           for i,d in enumerate(dataList[indx][1]):
+            length = len(d[1])
             if len(dataList[indx][1][i]) == 2:                
               dataList[indx][1][i].append(length)
             else:
               dataList[indx][1][i][2] = length
-            length = length + len(d[1])
-          if len(dataList[indx]) == 2:
-            dataList[indx].append(length)
+            totalLength = totalLength + length
+          if len(dataList[indx]) == 3:
+            dataList[indx].append(totalLength)
           else:
-            dataList[indx][2] = length
+            dataList[indx][3] = totalLength
         if dim == 1:
           dataList[indx].append(len(dataList[indx][1]))
     return dataList
- 
+
+def compute_sparseIndex(array,indx):
+  if len(indx) == 6:
+    row = int(indx[1])
+    col = int(indx[4])
+    for data in dataList:
+      if data[0] == array:
+        retIndx = get_sparseIndex(row,col,data[1])        
+        return retIndx
+
+def get_sparseIndex(row,col,indxList):
+  for indx,val in enumerate(indxList):
+    if val[0] == row:
+      retIndx = compute_offset(indx,indxList) + val[1].index(col)
+      return retIndx
+
 def prepare_bitVector(entry):
   flag = 0
   for data in dataList:
     if data[0] == get_array(entry):
       flag = 1
-      return [1]*data[2]
+      return [1]*data[3]
   if flag == 0:
     print 'error!!!data entry for array '+ get_array(entry)+ ' not found.'
 
@@ -99,24 +125,47 @@ def prepare_graph(iFile):
     if lines[i] == 'array':
       name = lines[i+1].strip().split(':')[1].strip()
       dim = lines[i+2].strip().split(':')[1].strip()
-      array = (name,int(dim))
+      sparsity = lines[i+3].strip().split(':')[1].strip()
+      array = (name,int(dim),int(sparsity))
       arrayList.append(array)
+      if int(sparsity) == 1:
+        sparseArrayList.append(name)
       i = i+3
+    elif lines[i] == 'loop':
+      iters = lines[i+1].strip().split(':')[1].strip().split(',')
+      for it in iters:
+        loopIters.append(it)
+      i = i+1
     elif lines[i] == 'node':
       name = lines[i+1].strip().split(':')[1].strip()
       access = lines[i+2].strip().split(':')[1].strip()
       index = lines[i+3].strip().split(':')[1].strip().split(',')
-      lb = [int(j) for j in lines[i+4].strip().split(':')[1].strip().split(',')]
-      ub = [int(j) for j in lines[i+5].strip().split(':')[1].strip().split(',')]
+      lb = lines[i+4].strip().split(':')[1].strip().split(',')
+      for indx,l1 in enumerate(lb):
+        l2 = re.sub(r'[1-9][0-9]*','',l1)
+        if l2 == '':
+          lb[indx] = int(l1)
+      ub = lines[i+5].strip().split(':')[1].strip().split(',')
+      for indx,l1 in enumerate(ub):
+        l2 = re.sub(r'[1-9][0-9]*','',l1)
+        if l2 == '':
+          ub[indx] = int(l1)
+#      lb = [int(j) for j in lines[i+4].strip().split(':')[1].strip().split(',') if re.match(r'[1-9][0-9]*',)]
+#      ub = [int(j) for j in lines[i+5].strip().split(':')[1].strip().split(',')]
       array = lines[i+6].strip().split(':')[1].strip()
       offset = [int(j) for j in lines[i+7].strip().split(':')[1].strip().split(',')]
       node = (name,access,index,lb,ub,array,offset)
       nodeList.append(node)
       i = i+8
     elif lines[i] == 'computation':
-      comp = lines[i+1].strip().split("=")
-      computationList.append((comp[0].strip(),comp[1]))
-      i = i+2
+      abstrExpr = lines[i+1].strip().split(':')[1].strip()
+      lhs = abstrExpr.strip().split('=')[0].strip()
+      rhs = re.sub('\s+','',abstrExpr.strip().split('=')[1].strip())
+      cond = lines[i+2].strip().split(':')[1].strip()
+      origExpr = lines[i+3].strip().split(':')[1].strip()
+      computation = (lhs,rhs,cond,origExpr)
+      computationList.append(computation)
+      i = i+4
     elif lines[i] == 'accessGraph':
       strt_indx = i+1
       indx = strt_indx
@@ -144,30 +193,21 @@ def analysis_mayNZ(dataList):
   workList = []
   for node in nodeList:
     workList.append(node[0])
-  cnt = 0
-  while (cnt <= 1):
-#  while (len(workList) > 0):
-    cnt = cnt+1
+  while (len(workList) > 0):
     rmList = []
     for entry in workList:
       compute_inInfo(entry)	    
       localInfoVec = compute_localInfoVec(entry)
       outInfoVec = compute_outInfoVec(entry,localInfoVec)
-      if get_bitVector(get_outInfo(entry)) == []:
+      if (get_bitVector(get_outInfo(entry)) == []) | (is_equal(get_bitVector(get_outInfo(entry)),outInfoVec) == 0):
   	outInfo = []
   	outInfo.append(entry)
    	outInfo.append(get_array(entry))
   	outInfo.append(outInfoVec)
 	set_outInfo(outInfo, entry)
-      elif is_equal(get_bitVector(get_outInfo(entry)),outInfoVec) == 0:
-  	outInfo = []
-  	outInfo.append(entry)
-   	outInfo.append(get_array(entry))
-  	outInfo.append(outInfoVec)
-	set_outInfo(outInfo, entry)
-#      else:
-#	rmList.append(entry)
-#        workList = remove_entry(rmList,workList)
+      else:
+	rmList.append(entry)
+    workList = remove_entry(rmList,workList)
 
 def remove_entry(rmList, workList):
   for entry in rmList:
@@ -188,18 +228,34 @@ def compute_localInfoVec(entry):
       post_process1(array)
       length = get_dataLength(get_array(entry))
       indxList = compute_indxList(relIndxList,array)
+      update_value(indxList,array)
       bv = compute_localInfoVec1(indxList,length)
       if len(indxList) != 0:
         update_bitVector(indxList,get_array(entry))
     return bv
+
+def update_value(indxList,array):
+  for ind,data in enumerate(dataList):
+    if data[0] == array:
+      for indx in indxList:
+        dataList[ind][2].insert(indx,0)
+      break
 
 def compute_indxList(relIndxList,array):
   indxList = []
   for data in dataList:
     if data[0] == array:
       for relIndx in relIndxList:
-        indxList.append(data[1][relIndx[0]][2] + relIndx[1])
+        indxList.append(compute_offset(relIndx[0],data[1]) + relIndx[1])
   return indxList
+
+def compute_offset(indx,list1):
+  indx1 = 0
+  offset = 0
+  while indx1 < indx:
+    offset = offset + list1[indx1][2]
+    indx1 = indx1 + 1
+  return offset
 
 def compute_localInfoVec1(indxList, length):
   bv = [0]*length
@@ -209,7 +265,7 @@ def compute_localInfoVec1(indxList, length):
 
 def compute_localInfo(entry):
     localEntryList = []
-    expr = re.sub('\s+','',get_expression(entry))
+    expr = get_abstrExpr(entry)
     exprCompList =  expr.strip().split('+')
     for comp in exprCompList:
       if re.search('\*',comp):
@@ -220,44 +276,12 @@ def compute_localInfo(entry):
 	baseRelOffset = compute_zeroMinus(get_offset(baseEntry))
         lhsRelIndex = compute_relIndex(get_index(entry),baseIndex)
 	lhsRelOffset = compute_relOffset(get_offset(entry),baseRelOffset,lhsRelIndex,baseIndex)
-	andEntryList = []
-        for pcomp in proCompList:
-          andEntry = []
-	  andEntry.append(pcomp)
-          relIndex = compute_relIndex(get_index(pcomp),baseIndex)
-	  andEntry.append(relIndex)
-          relOffset = compute_relOffset(get_offset(pcomp),baseRelOffset,relIndex,baseIndex)
-	  andEntry.append(relOffset)
-	  andEntry.append(get_nzEntries(pcomp))
-	  andEntryList.append(andEntry)
-        for lhsIdx in lhsRelIndex:
-          if re.search('INV',lhsIdx):
-            flag = 0
-            for indx,andEntry in enumerate(andEntryList):
-              if (lhsIdx in andEntry[1]) & (flag == 0):
-                relDiff = 0 - andEntry[2][andEntry[1].index(lhsIdx)]
-                andEntryList[indx][2][andEntry[1].index(lhsIdx)] = 0
-                lhsRelOffset[lhsRelIndex.index(lhsIdx)] = lhsRelOffset[lhsRelIndex.index(lhsIdx)] + relDiff
-                flag = 1
-              elif (lhsIdx in andEntry[1]) & (flag == 1):
-                offset = andEntryList[indx][2][andEntry[1].index(lhsIdx)] 
-                andEntryList[indx][2][andEntry[1].index(lhsIdx)] = offset + relDiff
+        andEntryList = create_andEntryList(proCompList,baseIndex,baseRelOffset)
+        modify_andEntryListLhsRelOffset(andEntryList,lhsRelOffset,lhsRelIndex)
 	for baseEntryNZ in baseEntryNZList:
-	  andOprdList = []
-   	  for andEntry in andEntryList:
-	    if andEntry[0] != baseEntry:
-	      nzEntryList = compute_nzEntry(baseIndex,baseEntryNZ,andEntry)
-	      if nzEntryList != []:
-		andOprdList.append(nzEntryList)
-	      else:
-		andOprdList = []
-		break
-            else:
-              tmpList = []
-              tmpList.append(baseEntryNZ)
-	      andOprdList.append(tmpList)
+          andOprdList = create_andOprdList(baseEntryNZ,andEntryList,baseIndex,baseEntry)
 	  if len(andOprdList) != 0:
-            localEntry = []
+            localEntry = []              
             for indx,lhsIndex in enumerate(lhsRelIndex):
               if not re.search('INV',lhsIndex):
                 localIndices = []
@@ -269,12 +293,11 @@ def compute_localInfo(entry):
                     if andEntry[2][andEntry[1].index(lhsIndex)] == 0:
                       localIndices = compute_localEntry(andOprdList[indx1],andEntry[1].index(lhsIndex),lhsRelOffset[indx])
                       localEntry = cartesian_product(localEntry,localIndices)
-            localEntry = check_limit(get_lb(entry),get_ub(entry),localEntry)
+            localEntry = check_limit(get_lb(entry),get_ub(entry),localEntry,entry)
+            localEntry = check_condition(get_condition(entry),localEntry,entry)
             for l1 in localEntry:
               localEntryList.append(l1)
-            flattenList = []
-            flattenList = flatten(andOprdList)       
-#            pseudoCode_gen2(localEntry,flattenList,comp)
+            pseudoCode_gen(localEntry,flatten(andOprdList),comp,entry)
       else:
         baseEntry = comp
 	baseEntryNZList = get_nzEntries(baseEntry)
@@ -291,49 +314,139 @@ def compute_localInfo(entry):
               localEntry = cartesian_product(localEntry, localIndices)              
             else:
               localEntry = expand_rangeIndex(get_lbIndex(entry,indx),get_ubIndex(entry,indx),localEntry)           
-          localEntry = check_limit(get_lb(entry),get_ub(entry),localEntry)
+          localEntry = check_limit(get_lb(entry),get_ub(entry),localEntry,entry)
+          localEntry = check_condition(get_condition(entry),localEntry,entry)
           for l1 in localEntry:            
-            localEntryList.append(l1)  
-          pseudoCode_gen1(localEntry,baseEntryNZ,comp)
+            localEntryList.append(l1) 
+          pseudoCode_gen(localEntry,toList(toList(baseEntryNZ)),comp,entry)
     localEntryList = rmDup_sort(localEntryList,get_dimension(get_array(entry)))
     return localEntryList
 
-def pseudoCode_gen1(localEntry,baseEntry,comp):
-  print localEntry
-  if len(codeList) == 0:
-    codeLine = []
-    codeLine.append(comp)
-    for le in localEntry:    
-      codeEntry = []
-      codeEntry.append(baseEntry)
-      codeEntry.append(le)
-      codeLine.append(codeEntry)
-    codeList.append(codeLine)
-  else:
-    indx = -1
-    for indx,lst in enumerate(codeList):
-      if lst[0] == comp:
-        break
-    if indx == -1:
-      codeLine = []
-      codeLine.append(comp)
-      for le in localEntry:
-        codeEntry = []
-        codeEntry.append(baseEntry)
-        codeEntry.append(le)
-        codeLine.append(codeEntry)
-      codeList.append(codeLine)
+def toList(item):
+  retList = []
+  retList.append(item)
+  return retList
+
+def toTuple(list1):
+  return tuple(list1)
+
+def create_andOprdList(baseEntryNZ,andEntryList,baseIndex,baseEntry):
+  andOprdList = []
+  for andEntry in andEntryList:
+    if andEntry[0] != baseEntry:
+      nzEntryList = compute_nzEntry(baseIndex,baseEntryNZ,andEntry)
+      if nzEntryList != []:
+        andOprdList.append(nzEntryList)
+      else:
+	andOprdList = []
+	break
     else:
-      for le in localEntry:
-        codeEntry = []
-        codeEntry.append(baseEntry)
-        codeEntry.append(le)
-        if codeEntry not in codeList[indx][1]:
-          codeList[indx].append(codeEntry)
-        
-      
-      
- 
+      tmpList = []
+      tmpList.append(baseEntryNZ)
+      andOprdList.append(tmpList)
+  return andOprdList
+
+def modify_andEntryListLhsRelOffset(andEntryList,lhsRelOffset,lhsRelIndex):
+  for lhsIdx in lhsRelIndex:
+    if re.search('INV',lhsIdx):
+      flag = 0
+      for indx,andEntry in enumerate(andEntryList):
+        if (lhsIdx in andEntry[1]) & (flag == 0):
+          relDiff = 0 - andEntry[2][andEntry[1].index(lhsIdx)]
+          andEntryList[indx][2][andEntry[1].index(lhsIdx)] = 0
+          lhsRelOffset[lhsRelIndex.index(lhsIdx)] = lhsRelOffset[lhsRelIndex.index(lhsIdx)] + relDiff
+          flag = 1
+        elif (lhsIdx in andEntry[1]) & (flag == 1):
+          offset = andEntryList[indx][2][andEntry[1].index(lhsIdx)] 
+          andEntryList[indx][2][andEntry[1].index(lhsIdx)] = offset + relDiff
+
+def create_andEntryList(proCompList,baseIndex,baseRelOffset):
+  andEntryList = []
+  for pcomp in proCompList:
+    andEntry = []
+    andEntry.append(pcomp)
+    relIndex = compute_relIndex(get_index(pcomp),baseIndex)
+    andEntry.append(relIndex)
+    relOffset = compute_relOffset(get_offset(pcomp),baseRelOffset,relIndex,baseIndex)
+    andEntry.append(relOffset)
+    andEntry.append(get_nzEntries(pcomp))
+    andEntryList.append(andEntry)
+  return andEntryList
+
+def compute_instr(lhs,indx,rhsList,entry,comp):
+#  array = get_array(entry)
+#  if array in sparseArrayList:
+#    instr = 'val_'+array+str(toTuple(compute_sparseIndex(array,lhs)))+'='+compute_oprd(rhsList,indx,entry,comp)
+#  else:
+  instr = entry+'@'+str(toTuple(lhs))+'='+compute_oprd(rhsList,indx,entry,comp)
+  return instr
+
+def compute_oprd(rhsList, indx, entry, comp):
+  arrayList = []
+  compList = comp.split("*")
+  codeEntry = compute_codeEntry(rhsList,indx)
+  oprdList = []
+  for ce in codeEntry:
+    for ind,c in enumerate(ce):
+      if ind == 0:
+        instr = compList[ind]+'@'+str(toTuple(c))
+      else:
+        instr = instr + '*' + compList[ind]+str(toTuple(c))
+  return instr
+
+def pseudoCode_gen(lhsList,rhsList,comp,entry):  
+  indexList = get_index(entry)
+  offsetList = get_offset(entry)
+  entryIndx = -1
+  if entry in entryList:
+    entryIndx = entryList.index(entry)
+  if entryIndx == -1:
+    entryList.append(entry)
+    entryIndx = entryList.index(entry)
+    instrList = []
+    for indx,lhs in enumerate(lhsList):    
+      instr = []
+      iterVec = compute_iter(lhs,loopIters,indexList,offsetList)
+      instr.append(iterVec)
+      instr1 = compute_instr(lhs,indx,rhsList,entry,comp)
+      instr.append(instr1)
+      instrList.append(instr)
+    codeList.append(instrList)
+  else:
+    for indx,lhs in enumerate(lhsList):    
+      iterVec = compute_iter(lhs,loopIters,indexList,offsetList)
+      flag = 0
+      for indx1, item in enumerate(codeList[entryIndx]):
+        if item[0] == iterVec:
+          flag = 1
+          oprd = compute_oprd(rhsList, indx, entry, comp)
+          if not oprd in item[1].split('=')[1]:
+            codeList[entryIndx][indx1][1] = item[1] + '+' + oprd
+          break
+      if flag == 0:
+        instr = []
+        instr.append(iterVec)
+        instr1 = compute_instr(lhs,indx,rhsList,entry,comp)
+        instr.append(instr1)
+        codeList[entryIndx].append(instr)
+          
+def compute_iter(lhs,loopIters,indexList,offsetList):
+  iterList = []
+  for i in loopIters:
+    if i in indexList:
+      iterList.append(lhs[indexList.index(i)] - offsetList[indexList.index(i)])
+    else:
+      iterList.append(0)
+  return toTuple(iterList)    
+
+def compute_codeEntry(rhsList,indx):
+  codeEntry = []
+  if len(rhsList) == 1:
+    codeEntry = rhsList
+  else:
+    codeEntry.append(rhsList[indx])
+  return codeEntry
+
 def flatten(list1):
   retList = []
   for l in list1:    
@@ -427,12 +540,26 @@ def update_data(list1,array):
         for cnt in range(len(colList)):
           relIndxList.append((0,cnt))
   return relIndxList
-          
-def check_limit(lb,ub,list1):
+    
+def check_condition(cond,list1,entry):
+  if cond == '':
+    return list1
+  else:
+    retList = []
+    for l1 in list1:
+      if get_value(cond,entry,l1) == True:
+        retList.append(l1)
+    return retList
+
+def check_limit(lb,ub,list1,entry):
   retList = []
   for l1 in list1:
     limit = 0
     for indx in range(len(l1)):
+      if type(lb[indx]) != int:        
+        lb[indx] = get_value(lb[indx],entry,l1)
+      if type(ub[indx]) != int:
+        ub[indx] = get_value(ub[indx],entry,l1)
       if (l1[indx] >= lb[indx])&(l1[indx] <= ub[indx]):
         limit = 1
       else:
@@ -440,7 +567,17 @@ def check_limit(lb,ub,list1):
     if limit == 1:
       retList.append(l1)          
   return retList
-      
+
+def get_value(item,entry,list1):
+  indxList = get_index(entry)
+  cmd  = ''
+  for i in item:
+    if i in indxList:
+      cmd = cmd + str(list1[indxList.index(i)])
+    else:
+      cmd = cmd + str(i)
+  return eval(cmd)
+
 def expand_rangeIndex(lb,ub,list1):
   retList = []
   if len(list1) != 0:
@@ -683,10 +820,20 @@ def get_offset(item):
     if node[0] == item:
       return node[6]  
 
-def get_expression(item):
+def get_abstrExpr(item):
   for comp in computationList:
     if comp[0] == item:
       return comp[1]	    
+
+def get_condition(item):
+  for comp in computationList:
+    if comp[0] == item:
+      return comp[2]	    
+
+def get_origExpr(item):
+  for comp in computationList:
+    if comp[0] == item:
+      return comp[3]	    
 
 def get_inInfo(item):
   for entry in dfaList:
@@ -703,10 +850,26 @@ def get_dimension(array):
     if ar[0] == array:
       return ar[1]
 
+def get_sparsity(array):
+  for ar in arrayList:
+    if ar[0] == array:
+      return ar[2]
+
 def get_dataLength(array):
   for data in dataList:
     if data[0] == array:
-      return data[2]
+      return data[3]
+
+def get_instrSet(component):
+  for code in codeList:
+    if code[0] == component:
+      return code[1]
+
+def get_instrRhs(component,lhs):
+  instrSet = get_instrSet(component)
+  for instr in instrSet:
+    if instr[0] == lhs:
+      return instr[1]
 
 def substitute(item):
   return item.strip().split(",")
@@ -720,15 +883,97 @@ def dump_dfaList():
   for dfa in dfaList:
     print dfa
 
+def generate_code():
+  for i in range(len(codeList)):
+    origExpr = computationList[i][3]
+    origOprdList = origExpr.split(' ')
+    for j in range(len(codeList[i])):
+      instr = ''
+      for origOprd in origOprdList:
+        if origOprd in entryList:
+          instr = instr + get_oprd(origOprd)
+
+
+#  fileNo = 1
+#  instrNo = 1
+#  f1 = open(directory+str(fileNo)+'.c','w')
+#  prologue_code(f1)
+#  f1.write('func'+str(fileNo)+'(){\n')
+#  for codeLine in codeList:
+#    f1.write(process_finalCodeList(codeLine[1])+';\n')
+#  f1.write('}\n')
+
+def prologue_code(f1):  
+  for data in dataList:
+    instr = 'val'+str(data[0])+'['+str(data[3])+']={'+str(data[2][0])
+    for indx in range(1,len(data[2])):
+      instr = instr+','+str(data[2][indx])
+    instr = instr + '};\n'
+    f1.write(instr)
+
+def process_finalCodeList(codeLine):
+  codeLineList = re.split('=|\+|\*',codeLine)
+  oprtList = re.sub('[^=\*\+]','',codeLine)
+  instr = ''
+  for indx,code in enumerate(codeLineList):
+    tmpList = code.split('@')
+    if indx != len(codeLineList)-1:
+      instr = instr+compute_sparseArray(tmpList)+oprtList[indx]
+    else:
+      instr = instr+compute_sparseArray(tmpList)
+  return instr
+
+def compute_sparseArray(oprd):
+    if get_sparsity(oprd[0]) == 1:
+      retArray = 'val'+oprd[0]
+      retIndex = compute_sparseIndex(oprd[0],oprd[1])
+      return retArray + '['+ str(retIndex) + ']'
+    else:
+      return oprd[0]+'['+str(oprd[1])+']'
+
+def sort_codeList():
+  retCodeList = []
+  for i in range(len(codeList)):
+    retCodeList.append(sorted(codeList[i],key=lambda x:x[0]))
+  return retCodeList
+
+def merge_codeList():
+  retCodeList = codeList[0]
+  for indx,code in enumerate(codeList):
+    if indx != 0:
+      retCodeList.extend(code)
+  return retCodeList
+
+def process_codeList():
+  newCodeList = merge_codeList()
+  newCodeList = sort_codeList(newCodeList)
+  return newCodeList
+
 if __name__ == "__main__":
-  dataFile = []
+###############################    
+# code to process graph file  #  
+###############################    
   graphFile = sys.argv[1]
   prepare_graph(graphFile)
-  dataFile.append(sys.argv[2])
-  dataFile.append(sys.argv[3])
-  dataFile.append(sys.argv[4])
-  dataList = prepare_data(dataFile)
-  post_process(dataList)
+###############################    
+# code to process dataFile    #
+###############################    
+  dataFile = []
+  for i in range(2,len(sys.argv)):
+    dataFile.append(sys.argv[i])
+  dataList = prepare_data(dataFile)  
+  postProcess_dataList(dataList)
+###############################    
+# code to prepare dfaList     #
+###############################    
   prepare_dfaList()
+###############################
+# code for non-zero analysis  #
+###############################
   analysis_mayNZ(dataList)
-  dump_dfaList()
+###############################
+# code generation             #
+###############################
+  codeList = sort_codeList()
+  print codeList
+  generate_code()
