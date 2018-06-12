@@ -11,7 +11,7 @@ dfaList = []
 entryList  = []
 codeList = []
 sparseArrayList = []
-directory = '/home/barnali/Documents/IITB/PHD/parallel_sparse/semiautomatic-tool/source/genCode_dir/'
+#directory = '/home/barnali/Documents/IITB/PHD/parallel_sparse/semiautomatic-tool/source/'
 def prepare_data(dataFile):
   array = ''
   rowDecl = ''
@@ -94,9 +94,9 @@ def post_process1(array):
     return dataList
 
 def compute_sparseIndex(array,indx):
-  if len(indx) == 6:
-    row = int(indx[1])
-    col = int(indx[4])
+  if len(indx) == 2:
+    row = int(indx[0])
+    col = int(indx[1])
     for data in dataList:
       if data[0] == array:
         retIndx = get_sparseIndex(row,col,data[1])        
@@ -125,14 +125,14 @@ def prepare_graph(iFile):
     if lines[i] == 'array':
       name = lines[i+1].strip().split(':')[1].strip()
       dim = lines[i+2].strip().split(':')[1].strip()
-      sparsity = lines[i+3].strip().split(':')[1].strip()
-      array = (name,int(dim),int(sparsity))
+      sparsity = int(lines[i+3].strip().split(':')[1].strip())
+      array = (name,int(dim),sparsity)
       arrayList.append(array)
-      if int(sparsity) == 1:
+      if sparsity == 1:
         sparseArrayList.append(name)
       i = i+3
     elif lines[i] == 'loop':
-      iters = lines[i+1].strip().split(':')[1].strip().split(',')
+      iters = re.sub('\s+','',lines[i+1].strip().split(':')[1].strip()).split(',')
       for it in iters:
         loopIters.append(it)
       i = i+1
@@ -150,11 +150,10 @@ def prepare_graph(iFile):
         l2 = re.sub(r'[1-9][0-9]*','',l1)
         if l2 == '':
           ub[indx] = int(l1)
-#      lb = [int(j) for j in lines[i+4].strip().split(':')[1].strip().split(',') if re.match(r'[1-9][0-9]*',)]
-#      ub = [int(j) for j in lines[i+5].strip().split(':')[1].strip().split(',')]
       array = lines[i+6].strip().split(':')[1].strip()
       offset = [int(j) for j in lines[i+7].strip().split(':')[1].strip().split(',')]
-      node = (name,access,index,lb,ub,array,offset)
+      func = lines[i+8].split(':')[1].strip()
+      node = (name,access,index,lb,ub,array,offset,func)
       nodeList.append(node)
       i = i+8
     elif lines[i] == 'computation':
@@ -374,10 +373,6 @@ def create_andEntryList(proCompList,baseIndex,baseRelOffset):
   return andEntryList
 
 def compute_instr(lhs,indx,rhsList,entry,comp):
-#  array = get_array(entry)
-#  if array in sparseArrayList:
-#    instr = 'val_'+array+str(toTuple(compute_sparseIndex(array,lhs)))+'='+compute_oprd(rhsList,indx,entry,comp)
-#  else:
   instr = entry+'@'+str(toTuple(lhs))+'='+compute_oprd(rhsList,indx,entry,comp)
   return instr
 
@@ -414,7 +409,7 @@ def pseudoCode_gen(lhsList,rhsList,comp,entry):
     codeList.append(instrList)
   else:
     for indx,lhs in enumerate(lhsList):    
-      iterVec = compute_iter(lhs,loopIters,indexList,offsetList)
+      iterVec = compute_iter(lhs,loopIters,indexList,offsetList)      
       flag = 0
       for indx1, item in enumerate(codeList[entryIndx]):
         if item[0] == iterVec:
@@ -883,25 +878,12 @@ def dump_dfaList():
   for dfa in dfaList:
     print dfa
 
-def generate_code():
-  for i in range(len(codeList)):
-    origExpr = computationList[i][3]
-    origOprdList = origExpr.split(' ')
-    for j in range(len(codeList[i])):
-      instr = ''
-      for origOprd in origOprdList:
-        if origOprd in entryList:
-          instr = instr + get_oprd(origOprd)
-
-
-#  fileNo = 1
-#  instrNo = 1
-#  f1 = open(directory+str(fileNo)+'.c','w')
-#  prologue_code(f1)
-#  f1.write('func'+str(fileNo)+'(){\n')
-#  for codeLine in codeList:
-#    f1.write(process_finalCodeList(codeLine[1])+';\n')
-#  f1.write('}\n')
+def generate_code(f1, codeList):
+  prologue_code(f1)
+  length = len(codeList)
+  for j in range(length):
+    instr = process_finalCodeList(codeList[j][1])
+    f1.write(instr+';\n')
 
 def prologue_code(f1):  
   for data in dataList:
@@ -924,18 +906,20 @@ def process_finalCodeList(codeLine):
   return instr
 
 def compute_sparseArray(oprd):
-    if get_sparsity(oprd[0]) == 1:
-      retArray = 'val'+oprd[0]
-      retIndex = compute_sparseIndex(oprd[0],oprd[1])
+    array = get_array(oprd[0])
+    indx = re.sub('[\s+()]','',oprd[1]).split(',')
+    if get_sparsity(array) == 1:
+      retArray = 'val'+array
+      retIndex = compute_sparseIndex(array,indx)
       return retArray + '['+ str(retIndex) + ']'
     else:
-      return oprd[0]+'['+str(oprd[1])+']'
+      if len(indx) == 2 :
+        return array+'['+str(indx[0])+']['+str(indx[1])+']'
+      elif len(indx) == 1 :
+        return array+'['+str(indx[0])+']'
 
-def sort_codeList():
-  retCodeList = []
-  for i in range(len(codeList)):
-    retCodeList.append(sorted(codeList[i],key=lambda x:x[0]))
-  return retCodeList
+def sort_codeList(newCodeList):
+  return sorted(newCodeList,key=lambda x:(x[0],x[1]))
 
 def merge_codeList():
   retCodeList = codeList[0]
@@ -959,7 +943,7 @@ if __name__ == "__main__":
 # code to process dataFile    #
 ###############################    
   dataFile = []
-  for i in range(2,len(sys.argv)):
+  for i in range(2,len(sys.argv)-1):
     dataFile.append(sys.argv[i])
   dataList = prepare_data(dataFile)  
   postProcess_dataList(dataList)
@@ -974,6 +958,8 @@ if __name__ == "__main__":
 ###############################
 # code generation             #
 ###############################
-  codeList = sort_codeList()
+  codeList = process_codeList()
   print codeList
-  generate_code()
+  f1 = open(sys.argv[len(sys.argv)-1], "w")
+  generate_code(f1,codeList)
+  f1.close()
