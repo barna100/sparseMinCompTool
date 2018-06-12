@@ -1,0 +1,49 @@
+array 
+	name 	: A
+	dim	: 2
+	sparsity: 1
+array
+	name 	: B
+	dim 	: 2
+	sparsity: 1
+array
+	name 	: C
+	dim 	: 2
+	sparsity: 1
+loop
+	iters	: i, j
+node 
+	name	: a
+	access 	: read
+	index	: i,j
+	lb	: 0,0
+	ub	: 2,2
+	array	: A
+	offset	: 0,0
+	func	: a
+node 	
+	name 	: b
+	access	: read
+	index	: i,j
+	lb	: 0,0
+	ub	: 2,2
+	array	: B
+	offset	: 0,0
+	func	: b
+node 
+	name 	: c
+	access	: write
+	index 	: i,j
+	lb	: 0,0
+	ub	: 2,2
+	array	: C
+	offset	: 0,0
+	func 	: c
+computation
+	abstrExpr : c = a + b
+	cond : 
+	origExpr : 
+accessGraph
+	a : c : 
+	b : c :
+	c :  : a,b
