@@ -85,12 +85,15 @@ def post_process1(array):
             else:
               dataList[indx][1][i][2] = length
             totalLength = totalLength + length
-          if len(dataList[indx]) == 3:
-            dataList[indx].append(totalLength)
-          else:
+          if len(dataList[indx]) == 4:
             dataList[indx][3] = totalLength
+          else:
+            dataList[indx].append(totalLength)
         if dim == 1:
-          dataList[indx].append(len(dataList[indx][1]))
+	  if len(dataList[indx]) == 4:
+            dataList[indx][3] = len(dataList[indx][1])
+	  else: 
+            dataList[indx].append(len(dataList[indx][1]))
     return dataList
 
 def compute_sparseIndex(array,indx):
@@ -99,14 +102,22 @@ def compute_sparseIndex(array,indx):
     col = int(indx[1])
     for data in dataList:
       if data[0] == array:
-        retIndx = get_sparseIndex(row,col,data[1])        
-        return retIndx
+        return get_sparseIndex2D(row,col,data[1])        
+  elif len(indx) == 1:
+    ind = int(indx[0])
+    for data in dataList:
+      if data[0] == array:
+        return get_sparseIndex1D(ind,data[1])
 
-def get_sparseIndex(row,col,indxList):
+def get_sparseIndex1D(ind,indxList) :
+  for indx,val in enumerate(indxList):
+    if val == ind:
+      return indx
+
+def get_sparseIndex2D(row,col,indxList) :
   for indx,val in enumerate(indxList):
     if val[0] == row:
-      retIndx = compute_offset(indx,indxList) + val[1].index(col)
-      return retIndx
+      return compute_offset(indx,indxList) + val[1].index(col)
 
 def prepare_bitVector(entry):
   flag = 0
@@ -244,8 +255,12 @@ def compute_indxList(relIndxList,array):
   indxList = []
   for data in dataList:
     if data[0] == array:
-      for relIndx in relIndxList:
-        indxList.append(compute_offset(relIndx[0],data[1]) + relIndx[1])
+      if get_dimension(array) == 2:
+        for relIndx in relIndxList:
+          indxList.append(compute_offset(relIndx[0],data[1]) + relIndx[1])
+      if get_dimension(array) == 1:
+        for relIndx in relIndxList:
+	  indxList.append(relIndx[1])
   return indxList
 
 def compute_offset(indx,list1):
@@ -327,7 +342,10 @@ def toList(item):
   return retList
 
 def toTuple(list1):
-  return tuple(list1)
+  if len(list1) == 1:
+    return '(' + str(list1[0]) + ')'
+  if len(list1) > 1:
+    return tuple(list1)
 
 def create_andOprdList(baseEntryNZ,andEntryList,baseIndex,baseEntry):
   andOprdList = []
@@ -386,7 +404,7 @@ def compute_oprd(rhsList, indx, entry, comp):
       if ind == 0:
         instr = compList[ind]+'@'+str(toTuple(c))
       else:
-        instr = instr + '*' + compList[ind]+str(toTuple(c))
+        instr = instr + '*' + compList[ind]+'@'+str(toTuple(c))
   return instr
 
 def pseudoCode_gen(lhsList,rhsList,comp,entry):  
@@ -470,9 +488,12 @@ def update_bitVector(indxList,array):
         outInfo[2] = tmpList
 
 def rmDup_sort(tmpList,dim):
+  tmpList = [list(tup) for tup in {tuple(item) for item in tmpList}]
   if dim == 2:
-    tmpList = [list(tup) for tup in {tuple(item) for item in tmpList}]
     return sortList2D(tmpList)
+  if dim == 1:
+    return sortList1D(tmpList)
+    
 
 def convert_toNestedLists(tmpList):
   resList = []
@@ -492,18 +513,14 @@ def convert_toNestedLists(tmpList):
       for i in resList:
         if i[0] == row:
           bisect.insort(i[1],col)
-  resList = sortListNested(resList)
+  resList = sortList1D(resList)
   return resList
 
-def sortListNested(list1):
+def sortList1D(list1):
     return sorted(list1, key=lambda x: int(x[0]))
 
-def sortList1D(list1):
-    return list1.sort(key=int)
-
 def sortList2D(list1):
-    list1 = sorted(list1, key=lambda x: (x[0],x[1]))
-    return list1
+    return sorted(list1, key=lambda x: (x[0],x[1]))
 
 def update_data(list1,array):
   relIndxList = []
@@ -534,6 +551,12 @@ def update_data(list1,array):
         dataList[indx][1].append(l1) 
         for cnt in range(len(colList)):
           relIndxList.append((0,cnt))
+  if dim == 1:
+    for l1 in list1:
+      indx1 = l1[0]
+      if indx1 not in dataList[indx][1]:
+	bisect.insort(dataList[indx][1],indx1)
+        relIndxList.append((indx1,dataList[indx][1].index(indx1)))
   return relIndxList
     
 def check_condition(cond,list1,entry):
