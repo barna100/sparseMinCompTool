@@ -910,7 +910,10 @@ def generate_code(f1, codeList):
 
 def prologue_code(f1):  
   for data in dataList:
-    instr = 'val'+str(data[0])+'['+str(data[3])+']={'+str(data[2][0])
+    if get_sparsity(data[0]) == 1:
+      instr = 'val'+str(data[0])+'['+str(data[3])+']={'+str(data[2][0])
+    else:
+      instr = str(data[0])+'['+str(data[3])+']={'+str(data[2][0])
     for indx in range(1,len(data[2])):
       instr = instr+','+str(data[2][indx])
     instr = instr + '};\n'
