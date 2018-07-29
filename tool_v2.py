@@ -1,3 +1,4 @@
+#!/usr/bin/python2.7
 import re
 import sys
 import bisect
@@ -164,18 +165,18 @@ def prepare_graph(iFile):
       array = lines[i+6].strip().split(':')[1].strip()
       offset = [int(j) for j in lines[i+7].strip().split(':')[1].strip().split(',')]
       func = lines[i+8].split(':')[1].strip()
-      node = (name,access,index,lb,ub,array,offset,func)
+      cond = lines[i+9].split(':')[1].strip()
+      node = (name,access,index,lb,ub,array,offset,func,cond)
       nodeList.append(node)
-      i = i+8
-    elif lines[i] == 'computation':
+      i = i+9
+    if lines[i] == 'computation':
       abstrExpr = lines[i+1].strip().split(':')[1].strip()
       lhs = abstrExpr.strip().split('=')[0].strip()
       rhs = re.sub('\s+','',abstrExpr.strip().split('=')[1].strip())
       cond = lines[i+2].strip().split(':')[1].strip()
-      origExpr = lines[i+3].strip().split(':')[1].strip()
-      computation = (lhs,rhs,cond,origExpr)
+      computation = (lhs,rhs,cond)
       computationList.append(computation)
-      i = i+4
+      i = i+3
     elif lines[i] == 'accessGraph':
       strt_indx = i+1
       indx = strt_indx
@@ -203,6 +204,7 @@ def analysis_mayNZ(dataList):
   workList = []
   for node in nodeList:
     workList.append(node[0])
+  cnt = 0
   while (len(workList) > 0):
     rmList = []
     for entry in workList:
@@ -217,7 +219,9 @@ def analysis_mayNZ(dataList):
 	set_outInfo(outInfo, entry)
       else:
 	rmList.append(entry)
+      dump_dfaEntry(entry)
     workList = remove_entry(rmList,workList)
+    cnt = cnt + 1
 
 def remove_entry(rmList, workList):
   for entry in rmList:
@@ -308,7 +312,8 @@ def compute_localInfo(entry):
                       localIndices = compute_localEntry(andOprdList[indx1],andEntry[1].index(lhsIndex),lhsRelOffset[indx])
                       localEntry = cartesian_product(localEntry,localIndices)
             localEntry = check_limit(get_lb(entry),get_ub(entry),localEntry,entry)
-            localEntry = check_condition(get_condition(entry),localEntry,entry)
+            localEntry = check_condition(get_nodeCondition(entry),localEntry,entry)
+            localEntry = check_condition(get_compCondition(entry),localEntry,entry)
             for l1 in localEntry:
               localEntryList.append(l1)
             pseudoCode_gen(localEntry,flatten(andOprdList),comp,entry)
@@ -329,7 +334,8 @@ def compute_localInfo(entry):
             else:
               localEntry = expand_rangeIndex(get_lbIndex(entry,indx),get_ubIndex(entry,indx),localEntry)           
           localEntry = check_limit(get_lb(entry),get_ub(entry),localEntry,entry)
-          localEntry = check_condition(get_condition(entry),localEntry,entry)
+          localEntry = check_condition(get_nodeCondition(entry),localEntry,entry)
+          localEntry = check_condition(get_compCondition(entry),localEntry,entry)
           for l1 in localEntry:            
             localEntryList.append(l1) 
           pseudoCode_gen(localEntry,toList(toList(baseEntryNZ)),comp,entry)
@@ -838,12 +844,17 @@ def get_offset(item):
     if node[0] == item:
       return node[6]  
 
+def get_nodeCondition(item):
+  for node in nodeList:
+    if node[0] == item:
+      return node[8]
+
 def get_abstrExpr(item):
   for comp in computationList:
     if comp[0] == item:
       return comp[1]	    
 
-def get_condition(item):
+def get_compCondition(item):
   for comp in computationList:
     if comp[0] == item:
       return comp[2]	    
@@ -907,18 +918,48 @@ def generate_code(f1, codeList):
   for j in range(length):
     instr = process_finalCodeList(codeList[j][1])
     f1.write(instr+';\n')
+  f1.write('}')
 
 def prologue_code(f1):  
+  prologue_code1()
   for data in dataList:
     if get_sparsity(data[0]) == 1:
-      instr = 'val'+str(data[0])+'['+str(data[3])+']={'+str(data[2][0])
+      instr = 'float val'+str(data[0])+'['+str(data[3])+']={'+str(data[2][0])
     else:
-      instr = str(data[0])+'['+str(data[3])+']={'+str(data[2][0])
+      instr = 'float ' + str(data[0])+'['+str(data[3])+']={'+str(data[2][0])
     for indx in range(1,len(data[2])):
       instr = instr+','+str(data[2][indx])
     instr = instr + '};\n'
     f1.write(instr)
 
+def prologue_code1():
+  f1.write('#include<stdio.h>\n')
+  f1.write('int main(){\n')
+  for data in dataList:
+    print data
+    dim = get_dimension(data[0])
+    if dim == 1:
+      init = 'int row' + str(data[0]) + '[' + str(data[3]) + ']={'
+      for i in data[1]:
+        init = init + str(i) + ',' 
+      init = init + '};\n'
+      init = re.sub(',}','}',init) 
+      f1.write(init)
+    elif dim == 2:
+      rinit = 'int row' + str(data[0]) + '[' + str(data[3]) + ']={'
+      cinit = 'int col' + str(data[0]) + '[' + str(data[3]) + ']={'
+      for indx in data[1]:
+	for i in range(indx[2]):
+	  rinit = rinit + str(indx[0]) + ','
+	for i in indx[1]:
+    	  cinit = cinit + str(i) + ','
+      rinit = rinit + '};\n'
+      cinit = cinit + '};\n'
+      rinit = re.sub(',}','}',rinit) 
+      cinit = re.sub(',}','}',cinit) 
+      f1.write(rinit)
+      f1.write(cinit)
+      
 def process_finalCodeList(codeLine):
   codeLineList = re.split('=|\+|\*',codeLine)
   oprtList = re.sub('[^=\*\+]','',codeLine)
@@ -972,6 +1013,7 @@ if __name__ == "__main__":
   for i in range(2,len(sys.argv)-1):
     dataFile.append(sys.argv[i])
   dataList = prepare_data(dataFile)  
+  print dataList, nodeList
   postProcess_dataList(dataList)
 ###############################    
 # code to prepare dfaList     #
