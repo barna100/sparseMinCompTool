@@ -2,7 +2,10 @@
 import re
 import sys
 import bisect
+import time
+import profile
 
+instrCnt = 1000
 arrayList = []
 loopIters = []
 nodeList = []
@@ -12,7 +15,6 @@ dfaList = []
 entryList  = []
 codeList = []
 sparseArrayList = []
-#directory = '/home/barnali/Documents/IITB/PHD/parallel_sparse/semiautomatic-tool/source/'
 def prepare_data(dataFile):
   array = ''
   rowDecl = ''
@@ -31,7 +33,7 @@ def prepare_data(dataFile):
           col = int(entry[1])            
           val = int(entry[2])
           indxList = update_indxList(row,col,indxList)
-          valList.append(val)
+          valList.append(val)          
     if dim == 1:
       for indx,line in enumerate(f1):      
         if indx >= 1:
@@ -40,7 +42,6 @@ def prepare_data(dataFile):
           val = int(entry[1])
 	  bisect.insort(indxList,indx)
           valList.append(val)
-
     f1.close()
     if array == '':
       print "error!!! annotate the data file with the name of accessing array"
@@ -57,7 +58,7 @@ def update_indxList(row,col,tmpList):
   for indx in tmpList:
     if row == indx[0]:
       bisect.insort(indx[1],col)
-      indx[1] = list(set(indx[1]))
+#      indx[1] = list(set(indx[1]))
       flag = 1
       break
   if flag == 0:
@@ -154,12 +155,12 @@ def prepare_graph(iFile):
       index = lines[i+3].strip().split(':')[1].strip().split(',')
       lb = lines[i+4].strip().split(':')[1].strip().split(',')
       for indx,l1 in enumerate(lb):
-        l2 = re.sub(r'[1-9][0-9]*','',l1)
+        l2 = re.sub(r'[0-9]+','',l1)
         if l2 == '':
           lb[indx] = int(l1)
       ub = lines[i+5].strip().split(':')[1].strip().split(',')
       for indx,l1 in enumerate(ub):
-        l2 = re.sub(r'[1-9][0-9]*','',l1)
+        l2 = re.sub(r'[0-9]+','',l1)
         if l2 == '':
           ub[indx] = int(l1)
       array = lines[i+6].strip().split(':')[1].strip()
@@ -172,9 +173,9 @@ def prepare_graph(iFile):
     if lines[i] == 'computation':
       abstrExpr = lines[i+1].strip().split(':')[1].strip()
       lhs = abstrExpr.strip().split('=')[0].strip()
-      rhs = re.sub('\s+','',abstrExpr.strip().split('=')[1].strip())
+      rhsAbstrExpr = re.sub('\s+','',abstrExpr.strip().split('=')[1].strip())
       cond = lines[i+2].strip().split(':')[1].strip()
-      computation = (lhs,rhs,cond)
+      computation = (lhs,rhsAbstrExpr,cond)
       computationList.append(computation)
       i = i+3
     elif lines[i] == 'accessGraph':
@@ -201,10 +202,7 @@ def prepare_dfaList():
     dfaList.append(item)
 
 def analysis_mayNZ(dataList):
-  workList = []
-  for node in nodeList:
-    workList.append(node[0])
-  cnt = 0
+  workList = [node[0] for node in nodeList]
   while (len(workList) > 0):
     rmList = []
     for entry in workList:
@@ -219,9 +217,7 @@ def analysis_mayNZ(dataList):
 	set_outInfo(outInfo, entry)
       else:
 	rmList.append(entry)
-      dump_dfaEntry(entry)
     workList = remove_entry(rmList,workList)
-    cnt = cnt + 1
 
 def remove_entry(rmList, workList):
   for entry in rmList:
@@ -402,7 +398,7 @@ def compute_instr(lhs,indx,rhsList,entry,comp):
 
 def compute_oprd(rhsList, indx, entry, comp):
   arrayList = []
-  compList = comp.split("*")
+  compList = comp.split('*')
   codeEntry = compute_codeEntry(rhsList,indx)
   oprdList = []
   for ce in codeEntry:
@@ -581,10 +577,14 @@ def check_limit(lb,ub,list1,entry):
     limit = 0
     for indx in range(len(l1)):
       if type(lb[indx]) != int:        
-        lb[indx] = get_value(lb[indx],entry,l1)
+        lbIndx = get_value(lb[indx],entry,l1)
+      else:
+        lbIndx = lb[indx]
       if type(ub[indx]) != int:
-        ub[indx] = get_value(ub[indx],entry,l1)
-      if (l1[indx] >= lb[indx])&(l1[indx] <= ub[indx]):
+        ubIndx = get_value(ub[indx],entry,l1)
+      else:
+        ubIndx = ub[indx]
+      if (l1[indx] >= lbIndx)&(l1[indx] <= ubIndx):
         limit = 1
       else:
         limit = 0
@@ -665,7 +665,9 @@ def compute_relevantNzEntry(indx,val,nzList):
   return [nz for nz in nzList if nz[indx] == val]
 	
 def get_nzEntries(entry):
-  return filter_nzEntries(get_bitVector(get_outInfo(entry)), get_array(entry))
+  return check_limit(get_lb(entry), get_ub(entry), check_condition(get_nodeCondition(entry),filter_nzEntries(get_bitVector(get_outInfo(entry)), get_array(entry)), entry),entry)
+#  return check_limit(get_lb(entry), get_ub(entry), filter_nzEntries(get_bitVector(get_outInfo(entry)), get_array(entry)), entry)
+#  return filter_nzEntries(get_bitVector(get_outInfo(entry)), get_array(entry))
 
 def filter_nzEntries(list1, array):
   for data in dataList:
@@ -753,7 +755,6 @@ def is_equal(list1,list2):
 	flag = 0
 	break
   return flag
-
 
 def or_op(list1, list2):
   return list1 or list2
@@ -859,11 +860,6 @@ def get_compCondition(item):
     if comp[0] == item:
       return comp[2]	    
 
-def get_origExpr(item):
-  for comp in computationList:
-    if comp[0] == item:
-      return comp[3]	    
-
 def get_inInfo(item):
   for entry in dfaList:
     if entry[0] == item:
@@ -912,12 +908,37 @@ def dump_dfaList():
   for dfa in dfaList:
     print dfa
 
-def generate_code(f1, codeList):
+def generate_code(f1,codeList,path):
   prologue_code(f1)
   length = len(codeList)
+  cnt = 0
+  fileCnt = 1
+  f1.write('gettimeofday(&start,NULL);\n')
+  funcName = 'ffunc'+str(fileCnt)
+  instr = funcName + '();\n'
+  f1.write(instr)
+  f2 = open(path +'/'+ funcName+'.c', "w")
+  f2.write('void ' + funcName+'(){\n')
   for j in range(length):
     instr = process_finalCodeList(codeList[j][1])
-    f1.write(instr+';\n')
+    cnt = cnt + 1
+    if cnt < instrCnt :
+      f2.write(instr+';\n')
+    elif cnt == instrCnt:
+      f2.write(instr+';\n')
+      f2.write('}\n')
+      fileCnt = fileCnt + 1
+      funcName = 'ffunc'+str(fileCnt)
+      instr = funcName + '();\n'
+      f1.write(instr)
+      f2 = open(path + '/' + funcName+'.c',"w")
+      f2.write('void ' + funcName + '(){\n')
+      cnt = 0
+    else:
+      f2.write(instr+';\n')
+  f2.write('}')    
+  f1.write('gettimeofday(&end,NULL);\n')
+  f1.write('printf("Time taken : %ld usec\\n",(end.tv_sec - start.tv_sec) * 1000000 + (end.tv_usec - start.tv_usec));\n')
   f1.write('}')
 
 def prologue_code(f1):  
@@ -933,10 +954,11 @@ def prologue_code(f1):
     f1.write(instr)
 
 def prologue_code1():
+  f1.write('#include<sys/time.h>\n')
   f1.write('#include<stdio.h>\n')
+  f1.write('struct timeval start, end;\n')
   f1.write('int main(){\n')
   for data in dataList:
-    print data
     dim = get_dimension(data[0])
     if dim == 1:
       init = 'int row' + str(data[0]) + '[' + str(data[3]) + ']={'
@@ -1010,10 +1032,10 @@ if __name__ == "__main__":
 # code to process dataFile    #
 ###############################    
   dataFile = []
-  for i in range(2,len(sys.argv)-1):
+  for i in range(2,len(sys.argv)-2):
     dataFile.append(sys.argv[i])
   dataList = prepare_data(dataFile)  
-  print dataList, nodeList
+#  print dataList
   postProcess_dataList(dataList)
 ###############################    
 # code to prepare dfaList     #
@@ -1022,12 +1044,15 @@ if __name__ == "__main__":
 ###############################
 # code for non-zero analysis  #
 ###############################
+  t1 = time.clock()
   analysis_mayNZ(dataList)
+  t2 = time.clock()
+  print "time by analysis_mayNZ is :"+ str(t2-t1)
 ###############################
 # code generation             #
 ###############################
   codeList = process_codeList()
-  print codeList
-  f1 = open(sys.argv[len(sys.argv)-1], "w")
-  generate_code(f1,codeList)
+  f1 = open(sys.argv[len(sys.argv)-2], "w")
+  path = sys.argv[len(sys.argv)-1]
+  generate_code(f1,codeList,path)
   f1.close()
