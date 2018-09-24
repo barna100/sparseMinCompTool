@@ -1,0 +1,120 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage{enumerate}
+\usepackage{listings}
+\setlength{\parindent}{2em}
+\setlength{\parskip}{1em}
+\renewcommand{\baselinestretch}{1.2}
+\title{Given Dense Loop, Automatically Construct the Minimal Set of Sufficient Computations for Sparse Data Set}
+\author{Barnali Basak, Uday Khedker, Supratim Biswas  \\
+	Indian Institute of Technology Bombay  \\
+	}
+
+\date{\today}
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Short introduction to subject of the paper \ldots 
+\end{abstract}
+
+\section{Introduction}
+Many scientific computation problems like, computational fluid dynamics,
+computer graphics, chemical process simulation, networking etc. need
+sparse matrices to represent data set. Due to presence of huge amount of zero
+elements, it is efficient to store only the non-zeros to save memory. Over the time,
+multiple storage formats like \emph{Compressed Sparse Row} (CSR), 
+\emph{Compressed Sparse Column} (CSC), \emph{Coordinate List} (COO), 
+\emph{Dictionary of keys} (DOK) etc. have been constructed to meet this
+requirement. 
+
+Loops, handling regular dense data structure like \emph{array}, are not 
+suitable for sparse data set. Currently loops are manually rewritten to fit
+the sparse data model which requires absolute understanding of
+the particular storage format and huge effort to maintain it.
+Additionally, presence of indirect references makes it difficult to automatically
+optimize the loop. Manual intervention is needed for the same. Also sparse
+loops are required to handle \emph{fill-in} problem which arises when a zero
+element is changed into non-zero during execution. 
+
+Here our objective is to automatically generate sparse data specific
+computations from the dense loop. 
+\subsection{Motivation}
+Due to presence of huge amount of zero elements in sparse data set, many computations 
+become spurious and therefore, can be ignored. 
+As an instance, consider expression {\tt a = 2 * 0 + 3 - 4}. Clearly, the
+expression can be reduced into {\tt a = 3 - 4}, making both multiplication and
+addition operations redundant.
+Given (a) layout of non-zero entries in input sparse matrices and 
+(b) dense loop, we intent to automatically find the set of non-spurious
+computations that is both sufficient and minimal. 
+
+Consider Figure~\ref{fig:1}(a) and Figure ~\ref{fig:1}(b) that present a dense
+loop and sparse data respectively. Our goal is to find the set of minimal 
+computations, shown in Figure~\ref{fig:1}(c), that semantically preserves the
+loop executing on the sparse data. 
+\begin{figure}
+	\begin{center}
+		\begin{tabular}{|c|c|}
+			\hline
+			\begin{tabular}{c}
+				\begin{lstlisting}[mathescape]
+				$for(i=2;i\le{16};i++)\{$
+				$S:\ A[i] = A[i-1]*A[i-2]-A[i+1]$
+				$\}$ 			
+				\end{lstlisting} \\
+				\hline				
+			\end{tabular}
+			&
+			\begin{tabular}
+
+			\end{tabular}
+		\end{tabular}}
+
+	\end{center}
+\end{figure}
+
+\subsection{Our Contribution}
+We propose a novel static data flow analysis technique that constructs the sparse
+computations automatically. Our key contributions are mentioned below. 
+
+\begin{itemize}
+	\item {\bf Access Dependence Graph (ADG):} 
+		Dependence graph representing dependences between various pairs of 
+		accesses to array elements in which at least one should be write. 
+	\item {\bf Nonzero Analysis:} Static data flow analysis that computes
+		set of nonzero elements at each access point in the \emph{ADG}.
+		{\tt In} and {\tt Out} of each access node in the \emph{ADG} are identified
+		as access points. 
+	\item {\bf Code Generation:} From the computed set of nonzero elements
+		at {\tt Out} of each write access node, we generate the final computation
+		instructions based on nonzero accesses of operands and
+		abstraction of mathematical operations. 
+\end{itemize}
+This approach has multifold benefits; (a) no manual effort is needed to write
+different sparse loops for different storage formats, (b) \emph{fill-in} entries
+are known at static time and (c) due to absence of
+any indirect reference, the generated code can be optimized aggressively. 
+
+\section{Access Dependence Graph}
+We propose a new type of dependence graph that represents dependences between
+pair of \emph{read} or \emph{write} accesses. First we
+define \emph{access dependence} and then \emph{access dependence graph}.
+\subsection{Access Dependence}
+There exists a dependence from memory access {\tt a} to memory access {\tt b},
+a$\to$b,
+if at least one of them is write in nature and any one of the following conditions
+holds. 
+\begin{enumerate}[(i)]
+	\item Both {\tt a} and {\tt b} access same memory location and {\tt b}
+		occurs after {\tt a}.
+	\item Both access different memory locations and {\tt a} is read and
+		{\tt b} is write in nature. Computation of the
+		value written by {\tt b} depends on the value read by 
+		access {\tt a}.
+\end{enumerate}
+\begin{thebibliography}{9}
+\bibitem[Doe]{doe} \emph{First and last \LaTeX{} example.},
+John Doe 50 B.C. 
+\end{thebibliography}
+
+\end{document}
